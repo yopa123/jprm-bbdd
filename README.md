@@ -28,6 +28,7 @@ Este motor nació de la curiosidad y de las ganas de explorar nuevos conceptos d
 ## 🚀 Capacidades del Motor
 
 - **Almacenamiento Columnar Eficiente:** Formato columnar comprimido y procesamiento vectorial en memoria para consultas rápidas.
+- **Colecciones de Documentos (Schemaless):** Almacenamiento JSON flexible de ultra-baja latencia con API REST estilo MongoDB (`/collections`) y funciones de extracción JSON en SQL (`json_extract`, `json_array_contains`).
 - **Navegación de Redes con `GRAPH_PATH`:** Motor de grafos transaccional integrado para resolver caminos y conexiones en microsegundos.
 - **GeoSQL Integrado:** Funciones geodésicas directas (`ST_DWithin`, `ST_DistanceSphere`) y compatibilidad con geometrías estándar (`POINT`).
 - **Tablas Federadas (Zero-ETL):** Comando `CREATE EXTERNAL TABLE` para consultar datos remotos directamente sin tener que copiarlos localmente.
@@ -128,6 +129,7 @@ La documentación técnica detallada está organizada en la carpeta [`docs/`](do
 10. **[Métricas y Monitoreo](docs/10_monitoring_metrics.md):** Healthcheck `/ping`, telemetría `/status` y Prometheus `/metrics`.
 11. **[SDK Oficial de Python y Conectores](docs/11_integrations_and_sdk.md):** Ejemplos prácticos para Python, Node.js, PHP y curl.
 12. **[Dataset de Prueba Retail (1M+ Registros)](docs/12_retail_sample_dataset.md):** Guía del paquete de prueba con 1.000.000 de órdenes y grafo cargado.
+13. **[Motor de Documentos (Tipo MongoDB)](docs/13_document_store.md):** Persistencia JSON schemaless, endpoints REST `/collections` y consultas híbridas del triángulo.
 
 Si usas asistentes de IA como Cursor, Claude Code o Copilot, revisa [`llms.txt`](llms.txt), que contiene la guía de sintaxis y arquitectura condensada.
 
