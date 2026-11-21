@@ -32,32 +32,18 @@ Este motor nació de la curiosidad y de las ganas de explorar nuevos conceptos d
 
 En lugar de montar tres sistemas separados (por ejemplo ClickHouse para análisis tabular, Neo4j para relaciones de red y MongoDB para documentos JSON), **jprm-BBDD unifica los tres paradigmas en un único binario con memoria compartida Zero-Copy:**
 
-```text
-                           ▲ [TABULAR ANALÍTICO]
-                          ╱ ╲ Apache Arrow (SIMD) + DataFusion
-                         ╱   ╲ Almacenamiento Columnar Parquet
-                        ╱  ★  ╲ Agregaciones de alta velocidad
-                       ╱       ╲
-                      ╱  TRIÁNGULO ╲
-                     ╱   UNIFICADO  ╲
-                    ╱                ╲
-                   ╱   Zero-Copy      ╲
-                  ╱    Plan Engine     ╲
-                 ╱                      ╲
- [GRAFOS TOPOLÓGICOS] ◀──────────────────▶ [DOCUMENTAL SCHEMALESS]
-  redb B-Tree Key-Value                     redb Multi-Collection + JSON
-  Vecinos y saltos O(1)                     Índices B-Tree en O(log N)
-  GRAPH_PATH() en SQL                       Vectores Cosine/SIMD & GraphRAG
-```
+<p align="center">
+  <img src="docs/assets/triangulo_motores.svg" alt="Triángulo de Motores Unificado" width="850" />
+</p>
 
 ### ¿Cómo interactúan los tres vértices?
 
-1. **Tabular Analítico (Parquet + Apache Arrow):**
-   - Ejecuta agrupaciones, métricas numéricas y filtros masivos con vectorización SIMD multihilo en nanosegundos.
-2. **Grafos Topológicos (B-Tree en `redb`):**
+1. **Tablas y Analítica (Parquet + Apache Arrow):**
+   - Ejecuta agrupaciones, métricas numéricas y filtros masivos con vectorización SIMD multihilo en nanosegundos (`SELECT`, `GROUP BY`, `JOIN`).
+2. **Redes y Conexiones (B-Tree en `redb`):**
    - Resuelve relaciones complejas, jerarquías y caminos de red (`GRAPH_PATH`) en microsegundos sin hacer costosos joins relacionales de múltiples tablas.
-3. **Documental y Vectorial (MessagePack en `redb`):**
-   - Guarda entidades dinámicas con campos arbitrarios, indexa propiedades JSON en $O(\log N)$ y calcula distancias vectoriales (`cosine_similarity`) para búsquedas semánticas.
+3. **Documentos JSON (MessagePack en `redb`):**
+   - Guarda entidades dinámicas con campos arbitrarios, indexa propiedades JSON en $O(\log N)$ y permite consultar colecciones en SQL (`COLLECTION()`, `json_extract()`).
 
 #### El "Triangle Join" (Cruce Híbrido en una sola consulta)
 El planificador del motor permite cruzar los 3 mundos en una sola sentencia SQL estándar:
@@ -68,10 +54,10 @@ SELECT
     json_extract(d.data, '$.nombre') AS cliente,
     t.monto,
     g.weight AS afinidad_red
-FROM COLLECTION('clientes_ia') d
+FROM COLLECTION('clientes') d
 JOIN GRAPH_PATH(OUTGOING, 101, 1) g ON CAST(json_extract(d.data, '$.nodo_id') AS BIGINT) = g.target_id
 JOIN sales t ON t.customer_id = g.target_id
-WHERE cosine_similarity(d.embedding, '[0.12, 0.95, 0.44]') > 0.85;
+WHERE t.monto > 500;
 ```
 
 ---
