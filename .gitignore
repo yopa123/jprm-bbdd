@@ -1,0 +1,14 @@
+# Local release artifacts (not tracked in git, uploaded to GitHub Releases)
+release/
+*.zip
+*.tar.gz
+*.exe
+*.parquet
+hybriddb_data/
+*.redb
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

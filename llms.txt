@@ -1,0 +1,278 @@
+# JPRM-BBDD: ESPECIFICACIÓN TÉCNICA Y GUÍA COMPLETA PARA MODELOS DE IA (LLMs)
+# Compatible con: Cursor, Claude Code, GitHub Copilot, ChatGPT, Windsurf
+# Contexto: Motor Híbrido Unificado (Columnar OLAP + Grafo Topológico ACID + GeoSQL Espacial)
+# Repositorio Oficial: https://github.com/yopa123/jprm-bbdd
+
+Este archivo proporciona la base de conocimiento completa para que cualquier modelo de lenguaje pueda diseñar esquemas de datos, redactar consultas complejas, planificar migraciones desde motores tradicionales (PostgreSQL, MySQL, SQL Server, Neo4j, ClickHouse) y generar código de integración sin alucinaciones de sintaxis.
+
+---
+
+## 📑 ÍNDICE DE DOCUMENTACIÓN TÉCNICA OFICIAL (ENLACES DE REFERENCIA)
+
+Para consultar el desglose exhaustivo de cada módulo, recurre a la documentación oficial del repositorio:
+
+- [01. Configuración del Servidor y Parámetros (`jprm-bbdd.toml`)](https://github.com/yopa123/jprm-bbdd/blob/main/docs/01_configuration.md)
+- [02. Sintaxis SQL, Tipos de Datos y Planificador Vectorizado](https://github.com/yopa123/jprm-bbdd/blob/main/docs/02_sql_reference.md)
+- [03. GeoSQL: Geofencing, Haversine y Coordenadas WKT](https://github.com/yopa123/jprm-bbdd/blob/main/docs/03_geospatial.md)
+- [04. Topología de Redes y Operador de Grafos `GRAPH_PATH`](https://github.com/yopa123/jprm-bbdd/blob/main/docs/04_graph_queries.md)
+- [05. Ingesta Heterogénea y Tablas Federadas Zero-ETL](https://github.com/yopa123/jprm-bbdd/blob/main/docs/05_ingestion_and_zero_etl.md)
+- [06. Sincronización Incremental Delta (CDC)](https://github.com/yopa123/jprm-bbdd/blob/main/docs/06_incremental_sync.md)
+- [07. Vistas Materializadas con Refresco Automático](https://github.com/yopa123/jprm-bbdd/blob/main/docs/07_materialized_views.md)
+- [08. Seguridad, Usuarios y Control de Acceso (RBAC)](https://github.com/yopa123/jprm-bbdd/blob/main/docs/08_security_rbac.md)
+- [09. Copias de Seguridad Atómicas en Caliente (Backup)](https://github.com/yopa123/jprm-bbdd/blob/main/docs/09_backup_and_recovery.md)
+- [10. Observabilidad, Diagnóstico y Métricas Prometheus](https://github.com/yopa123/jprm-bbdd/blob/main/docs/10_monitoring_metrics.md)
+- [11. SDK Oficial de Python (FastAPI/Sync) y Conectores de Código](https://github.com/yopa123/jprm-bbdd/blob/main/docs/11_integrations_and_sdk.md)
+- [12. Guía del Dataset de Prueba Retail (1M+ Registros)](https://github.com/yopa123/jprm-bbdd/blob/main/docs/12_retail_sample_dataset.md)
+
+---
+
+## 1. ARQUITECTURA DEL MOTOR Y PROTOCOLO DE COMUNICACIÓN
+
+jprm-BBDD es un motor unificado en memoria y disco desarrollado en Rust. No utiliza sockets binarios propietarios opacos; opera a través de HTTP estándar y protocolo Wire compatible con ClickHouse.
+
+- **Puerto por defecto:** `8123`
+- **Método HTTP para consultas:** `POST http://<host>:8123/`
+- **Cuerpo de la petición:** La consulta SQL en texto plano (`Content-Type: text/plain`).
+- **Autenticación:**
+  - Header HTTP: `Authorization: Bearer <token>`
+  - O bien: `X-ClickHouse-Key: <token>`
+- **Healthcheck:** `GET /ping` -> Retorna `ok` (código HTTP 200).
+- **Telemetría:** `GET /status` (JSON con uptime, tablas y jobs activos) y `GET /metrics` (Prometheus).
+
+---
+
+## 2. TIPOS DE DATOS Y DEFINICIÓN DE TABLAS (DDL)
+
+Las tablas almacenan físicamente datos en formato Parquet columnar comprimido con poda de bloques en disco.
+
+### Tipos de Datos Soportados
+- `INT` o `INTEGER`: Entero con signo de 64 bits.
+- `BIGINT`: Entero con signo de 64 bits para identificadores grandes o claves foráneas.
+- `FLOAT` o `REAL`: Punto flotante de 32 bits.
+- `DOUBLE` o `DOUBLE PRECISION`: Punto flotante de 64 bits (obligatorio para coordenadas `lat` y `lon` en GeoSQL).
+- `VARCHAR`, `TEXT` o `STRING`: Cadena de texto UTF-8.
+- `BOOLEAN` o `BOOL`: Booleano binario (`TRUE` / `FALSE`).
+- `TIMESTAMP`: Marca temporal de 64 bits en nanosegundos (formato ISO-8601 string o numérico).
+
+### Sentencias DDL Esenciales
+```sql
+-- Creación de tabla analítica
+CREATE TABLE clientes (
+    id BIGINT,
+    nombre VARCHAR,
+    email VARCHAR,
+    saldo DOUBLE,
+    activo BOOLEAN,
+    lat DOUBLE,
+    lon DOUBLE,
+    fecha_registro TIMESTAMP
+);
+
+-- Listar tablas del catálogo
+SHOW TABLES;
+
+-- Eliminar tabla
+DROP TABLE clientes;
+```
+
+---
+
+## 3. MANIPULACIÓN Y CONSULTAS ANALÍTICAS (DML)
+
+El motor procesa filtros y agregaciones mediante vectorización en memoria:
+
+```sql
+-- Inserción de valores
+INSERT INTO clientes VALUES 
+    (1, 'Carlos Gonzalez', 'carlos@empresa.cl', 154000.50, TRUE, -33.4172, -70.6067, '2026-01-10T10:00:00Z'),
+    (2, 'Valentina Soto', 'valentina@empresa.cl', 890000.00, TRUE, -33.4022, -70.5786, '2026-02-15T14:30:00Z');
+
+-- Agregaciones vectorizadas agrupadas
+SELECT 
+    activo,
+    COUNT(*) AS total_usuarios,
+    ROUND(SUM(saldo), 2) AS saldo_total,
+    ROUND(AVG(saldo), 2) AS saldo_promedio,
+    MAX(saldo) AS saldo_maximo
+FROM clientes
+GROUP BY activo
+ORDER BY saldo_total DESC;
+
+-- Paginación eficiente
+SELECT id, nombre, saldo FROM clientes ORDER BY saldo DESC LIMIT 20 OFFSET 40;
+
+-- Inspección del plan físico y lógico
+EXPLAIN SELECT * FROM clientes WHERE saldo > 50000;
+```
+
+---
+
+## 4. GEOSQL: CAPACIDADES GEOESPACIALES EN TIEMPO REAL
+
+Reemplaza la necesidad de PostGIS para análisis geodésicos sobre millones de coordenadas.
+
+> **Regla de oro de coordenadas:**
+> - En cálculos de distancia (`ST_DistanceSphere`, `ST_DWithin`): la convención de argumentos es **`(latitud, longitud)`**.
+> - En geometrías WKT estándar (`ST_Point`): la convención cartesiana es **`(longitud, latitud)`**.
+
+### Funciones Disponibles
+1. **`ST_DWithin(lat1, lon1, lat2, lon2, radio_metros) -> BOOLEAN`**
+   - Evalúa si dos coordenadas están dentro de un radio esférico en metros.
+   - **Recomendación para IA:** Usar SIEMPRE en cláusulas `WHERE` para geofencing (opera como máscara booleana SIMD sin ramas condicionales).
+
+2. **`ST_DistanceSphere(lat1, lon1, lat2, lon2) -> DOUBLE`**
+   - Retorna la distancia ortodrómica esférica exacta en metros según la fórmula Haversine ($R = 6.371.000\text{ m}$).
+
+3. **`ST_Point(lon, lat) -> VARCHAR`**: Genera la representación WKT `"POINT(lon lat)"`.
+4. **`ST_X(wkt_point) -> DOUBLE`**: Extrae la longitud ($X$).
+5. **`ST_Y(wkt_point) -> DOUBLE`**: Extrae la latitud ($Y$).
+
+### Ejemplo de Consulta Geoespacial
+```sql
+-- Buscar clientes a menos de 5 km (5.000 m) de una tienda y ordenar por cercanía
+SELECT 
+    c.id,
+    c.nombre,
+    c.lat,
+    c.lon,
+    ROUND(ST_DistanceSphere(c.lat, c.lon, -33.4172, -70.6067), 0) AS distancia_metros
+FROM clientes c
+WHERE ST_DWithin(c.lat, c.lon, -33.4172, -70.6067, 5000.0)
+ORDER BY distancia_metros ASC
+LIMIT 10;
+```
+
+---
+
+## 5. TOPOLOGÍA DE GRAFOS NATIVA (`GRAPH_PATH`)
+
+jprm-BBDD incorpora un motor de grafos transaccional con índice B-Tree ACID. No requiere Neo4j para navegar redes.
+
+### Función de Tabla: `GRAPH_PATH(direccion, nodo_origen_id, tipo_relacion)`
+- **Direcciones permitidas:** `OUTGOING` (saliente), `INCOMING` (entrante), `BOTH` (ambas).
+- **Retorno:** Una relación virtual en memoria con una sola columna: `node_id BIGINT`.
+- **Integración con Tablas:** Se cruza usando un `JOIN` estándar de SQL.
+
+### Ejemplo de Cruce Híbrido Grafo + Relacional
+```sql
+-- Averiguar qué clientes compraron el producto 7 (Relación 101) y filtrar los VIP
+SELECT 
+    c.id, 
+    c.nombre, 
+    c.email, 
+    c.saldo
+FROM GRAPH_PATH(INCOMING, 7, 101) g
+JOIN clientes c ON g.node_id = c.id
+WHERE c.saldo > 100000.0;
+
+-- Red de amigos/recomendaciones del cliente 1052 (Relación 301)
+SELECT c.nombre, c.email
+FROM GRAPH_PATH(OUTGOING, 1052, 301) g
+JOIN clientes c ON g.node_id = c.id;
+```
+
+---
+
+## 6. INGESTA MASIVA, ZERO-ETL Y CDC INCREMENTAL
+
+### 6.1 Ingesta Masiva Local (`IMPORT TABLE`)
+Extrae de orígenes externos y genera almacenamiento columnar Parquet local:
+```sql
+-- Desde PostgreSQL
+IMPORT TABLE ordenes_locales FROM POSTGRES 'postgres://user:pass@host:5432/db' TABLE 'ordenes';
+
+-- Desde MySQL con consulta SQL personalizada
+IMPORT TABLE usuarios_vip FROM MYSQL 'mysql://user:pass@host:3306/db' QUERY 'SELECT * FROM users WHERE status = 1';
+
+-- En segundo plano (asíncrono sin bloquear el cliente HTTP)
+IMPORT TABLE transacciones FROM MSSQL 'sqlserver://user:pass@host:1433?database=erp' TABLE 'movimientos' BACKGROUND;
+
+-- Desde archivos CSV o Excel
+IMPORT TABLE paises FROM CSV '/data/paises.csv';
+IMPORT TABLE metas FROM EXCEL '/data/plan_2026.xlsx' SHEET 'Metas_Q1';
+```
+
+### 6.2 Tablas Federadas Zero-ETL (`CREATE EXTERNAL TABLE`)
+Permite consultar bases de datos remotas en tiempo real sin copiar datos al disco local:
+```sql
+CREATE EXTERNAL TABLE inventario_remoto 
+FROM POSTGRES 'postgres://user:pass@cluster:5432/wms' 
+TABLE 'stock_bodega';
+```
+
+### 6.3 Sincronización Incremental (CDC)
+Descarga únicamente las filas agregadas o modificadas a partir de una columna de control (marca temporal o ID autoincremental):
+```sql
+SYNC TABLE ordenes_locales 
+FROM POSTGRES 'postgres://user:pass@host:5432/db' 
+TABLE 'ordenes' 
+ON 'updated_at';
+```
+
+---
+
+## 7. VISTAS MATERIALIZADAS CON AUTO-REFRESCO
+
+Precalcula agregaciones costosas para consultas en sub-milisegundos:
+```sql
+-- Vista con refresco periódico automático en segundo plano
+CREATE MATERIALIZED VIEW mv_ventas_diarias 
+REFRESH EVERY 60 SECONDS AS
+SELECT 
+    DATE_TRUNC('day', fecha_registro) AS dia,
+    COUNT(*) AS total_ventas,
+    SUM(saldo) AS recaudacion
+FROM clientes
+GROUP BY DATE_TRUNC('day', fecha_registro);
+
+-- Forzar refresco inmediato
+REFRESH MATERIALIZED VIEW mv_ventas_diarias;
+
+-- Eliminar vista materializada
+DROP MATERIALIZED VIEW mv_ventas_diarias;
+```
+
+---
+
+## 8. SEGURIDAD Y CONTROL DE ACCESO (RBAC)
+
+El motor gestiona credenciales y permisos granulares por tabla o globales:
+```sql
+-- Crear usuario con token de acceso Bearer
+CREATE USER backend_app IDENTIFIED BY 'token_secreto_backend_2026';
+
+-- Crear usuario administrador
+CREATE USER admin_corp IDENTIFIED BY 'token_admin_ultra_seguro' ADMIN;
+
+-- Asignar privilegios (SELECT, INSERT, CREATE, DROP, IMPORT)
+GRANT SELECT ON clientes TO backend_app;
+GRANT SELECT, INSERT ON * TO backend_app;
+GRANT IMPORT ON * TO backend_app;
+
+-- Revocar y auditar
+REVOKE INSERT ON * FROM backend_app;
+SHOW USERS;
+DROP USER backend_app;
+```
+
+---
+
+## 9. RESPALDOS ATÓMICOS EN CALIENTE (BACKUP)
+
+Saca un snapshot instantáneo de tablas y grafos con manifiesto SHA-256 sin bloquear lecturas:
+```sql
+BACKUP DATABASE TO '/var/backups/jprm_bbdd/snapshot_2026_11_20';
+```
+
+---
+
+## 10. REGLAS PARA LA GENERACIÓN DE CÓDIGO POR ASISTENTES DE IA
+
+Cuando generes código o modelos de datos para jprm-BBDD:
+1. **No inventes dialectos ni funciones:** Limítate a las funciones documentadas (`ST_DWithin`, `ST_DistanceSphere`, `ST_Point`, `GRAPH_PATH`, `IMPORT TABLE`, `SYNC TABLE`).
+2. **Conexión HTTP:** Construye clientes que envíen el SQL en el `body` con método `POST` y `Content-Type: text/plain`.
+3. **Manejo de Parámetros:** Si generas código en Python, utiliza la interpolación segura de parámetros con `:parametro` o el SDK oficial `JprmBBDDClient`.
+4. **Diseño de Modelos Híbridos:** 
+   - Las entidades con atributos planos, métricas y geolocalización van en **Tablas Columnares**.
+   - Las interacciones de red, amistades, compras de usuarios o caminos de dependencia van en el **Grafo Topológico**.
+   - Las consultas de negocio se resuelven uniendo ambos mundos mediante `GRAPH_PATH(...) JOIN tabla ON node_id = id`.
